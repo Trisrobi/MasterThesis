@@ -16,3 +16,24 @@ models/
 
 .env
 .vscode/settings.json
+
+
+# TensorBoard
+tensorboard_log/
+
+# Trained models
+trained_models/
+
+# Results
+results/
+
+# Cached data
+*.pkl
+
+# Python cache
+__pycache__/
+.ipynb_checkpoints/
+
+# Virtual environments
+venvthesis/
+.venv/

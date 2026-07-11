@@ -99,3 +99,5 @@ import json
 from datetime import datetime
 
 RUN_NAME = 'Test'
+
+MAXLAG=5

@@ -63,7 +63,7 @@ def graph_summary_stats(G):
 
     return stats
 
-def build_network_dataframe(rolling_corr, start_idx=62,threshold=0.5,use_abs=True):
+def build_network_dataframe(rolling_corr,threshold=0.5,use_abs=True):
     network_data=[]
     unique_dates = rolling_corr.index.get_level_values(0).unique()
     

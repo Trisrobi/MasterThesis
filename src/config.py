@@ -1,4 +1,5 @@
 SEED= 42
+graph_type="Granger"
 
 #Run Modes
 DEBUG=True
@@ -32,8 +33,16 @@ INDICATORS = ['macd',
                 'rsi_30',
                 'cci_30',
                 'dx_30']
-NETWORK_INDICATORS=['degree','clustering','betweenness','strength']
-MARKET_LEVEL_NETWORK_INDICATORS = ['Average_Centrality', 'Average_Clustering','Average_Strength', 'Average_Betweenness']
+
+if graph_type=="Correlation":
+    NETWORK_INDICATORS=['degree','clustering','betweenness','strength']
+    MARKET_LEVEL_NETWORK_INDICATORS = ['Average_Centrality', 'Average_Clustering','Average_Strength', 'Average_Betweenness']
+elif graph_type =="Granger":
+    NETWORK_INDICATORS=["granger_in_degree", "granger_out_degree", "granger_pagerank"]
+    MARKET_LEVEL_NETWORK_INDICATORS = ["Average_granger_in_degree", "Average_granger_out_degree", "Average_granger_pagerank"]
+
+else:
+    print("ok")
 
 #Training Parameters:
 

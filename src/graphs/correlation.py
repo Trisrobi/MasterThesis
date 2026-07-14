@@ -161,3 +161,120 @@ def plot_graph_at_date(rolling_corr, date, threshold=0.5, use_abs=True, show_tab
     plt.close(fig)
 
     return G
+
+
+# ============================================================
+# State-space extension: node-level network features
+# ============================================================
+# The original FinRL state contains:
+# cash balance, prices, holdings, and technical indicators.
+#
+# This extension adds node-level network variables for each stock.
+#
+# IMPORTANT:
+# Network features are shifted by one trading day within each ticker.
+# This avoids look-ahead bias: the agent at time t should not use
+# network information computed using same-day closing prices.
+# ============================================================
+
+def compile_node_information_correlation(network_data, processed_data):
+    network_data = network_data.copy()
+    processed_data = processed_data.copy()
+    network_data["date"] = pd.to_datetime(network_data["date"])
+    processed_data["date"] = pd.to_datetime(processed_data["date"])
+
+    NODE_NETWORK_FEATURES = ["degree", "clustering", "strength", "betweenness"]
+
+    network_data[NODE_NETWORK_FEATURES] = (
+        network_data
+        .groupby("tic")[NODE_NETWORK_FEATURES]
+        .shift(1)
+    )
+    network_data=network_data.dropna()
+
+    processed_data = processed_data.merge(network_data,on=["date", "tic"],how="left",validate="many_to_one")
+    processed_data[NODE_NETWORK_FEATURES] = processed_data[NODE_NETWORK_FEATURES].fillna(0)
+    return processed_data
+
+# ============================================================
+# State-space extension: market-level network features
+# ============================================================
+# Node-level features describe individual stocks.
+# Market-level features describe the structure of the whole market.
+#
+# Market-level metrics are computed from the already-shifted node-level
+# network features. Therefore, all network information available at date t
+# is based only on information up to date t-1, preventing look-ahead bias.
+#
+#
+# These variables provide information about the overall state
+# of the market network.
+#
+# Examples include:
+# - Average Degree Centrality
+# - Average Clustering Coefficient
+# - Average Strength
+# - Average Betweenness Centrality
+#
+# This allows the agent to interpret node-level positions
+# relative to the structure of the market as a whole.
+#
+# This is useful because the importance of a stock's node-level
+# position depends on the overall market structure.
+# ============================================================
+
+def compile_market_information_correlation(network_data,processed_data):
+    network_data = network_data.copy()
+    processed_data = processed_data.copy()
+    network_data["date"] = pd.to_datetime(network_data["date"])
+    processed_data["date"] = pd.to_datetime(processed_data["date"])
+    average_centralities_date= network_data.groupby('date')['degree'].mean()
+    average_clustering_date= network_data.groupby('date')['clustering'].mean()
+    average_betweenness_date= network_data.groupby('date')['betweenness'].mean()
+    average_strength_date= network_data.groupby('date')['strength'].mean()
+
+    average_measures_date=pd.DataFrame({
+        'Average_Centrality': average_centralities_date,
+        'Average_Clustering': average_clustering_date, 
+        'Average_Betweenness': average_betweenness_date,
+        'Average_Strength': average_strength_date
+    }).reset_index()
+
+    MARKET_NETWORK_FEATURES = ["Average_Centrality", "Average_Clustering", "Average_Betweenness", "Average_Strength"]
+    average_measures_date[MARKET_NETWORK_FEATURES] = (average_measures_date[MARKET_NETWORK_FEATURES].shift(1))
+
+    processed_data = processed_data.merge(
+        average_measures_date,
+        on="date",
+        how="left",
+        validate="many_to_one"
+    )
+
+
+    processed_data[MARKET_NETWORK_FEATURES] = processed_data[MARKET_NETWORK_FEATURES].fillna(0)
+    return processed_data
+
+
+def add_correlation_network_features(
+    processed_data,
+    rolling_corr,
+    threshold=0.5,
+    use_abs=True
+):
+    network_data = build_network_dataframe(
+        rolling_corr,
+        threshold=threshold,
+        use_abs=use_abs
+    )
+
+    processed_data = compile_node_information_correlation(
+        network_data,
+        processed_data
+    )
+
+    processed_data = compile_market_information_correlation(
+        network_data,
+        processed_data
+    )
+
+    return processed_data

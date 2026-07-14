@@ -110,3 +110,5 @@ from datetime import datetime
 RUN_NAME = 'Test'
 
 MAXLAG=5
+GRANGER_PICKLE_PATH = "granger_adj_matrices.pkl"
+GRANGER_ALPHA=0.05

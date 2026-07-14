@@ -1,183 +1,172 @@
 import networkx as nx
-import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 from statsmodels.tsa.api import VAR
 from statsmodels.tsa.stattools import grangercausalitytests
+import os
+
 # Granger-network settings.
 
-def run_VAR_for_Granger(returns_rolling):
-    model= VAR(returns_rolling)
+'''
+Option 1 FULL VAR(Not too useful unless parameters are changed)
+from statsmodels.tsa.api import VAR
+
+window= cfg.REBALANCE_WINDOW
+for end in range(window, len(returns)-1):
+    returns_window= returns.iloc[end-window:end]
+    model= VAR(returns_window)
     results= model.fit(maxlags=5)
     print(results.summary())
+'''
 
 
-def build_graph_at_date(returns, date, threshold=0.5):
-    """Build a granger causality graph for a single date.
-
-    Parameters
-    ----------
-    rolling_corr : pd.DataFrame
-        Multi-index rolling correlation matrix created by returns.rolling(...).corr().
-    date : str or pd.Timestamp
-        Date for which to extract the correlation matrix.
-    threshold : float
-        Correlation cutoff. Edges below this value are removed.
-    use_abs : bool
-        If True, threshold absolute correlations. If False, keep only positive correlations
-        above the threshold.
-    """
 
 
-def build_graph_at_date(rolling_corr, date, threshold=0.5, use_abs=True):
-    """Build a weighted correlation graph for a single date.
-
-    Parameters
-    ----------
-    rolling_corr : pd.DataFrame
-        Multi-index rolling correlation matrix created by returns.rolling(...).corr().
-    date : str or pd.Timestamp
-        Date for which to extract the correlation matrix.
-    threshold : float
-        Correlation cutoff. Edges below this value are removed.
-    use_abs : bool
-        If True, threshold absolute correlations. If False, keep only positive correlations
-        above the threshold.
-    """
-    corr_matrix = rolling_corr.loc[date].copy().fillna(0)
-    adj_matrix=corr_matrix.abs() if use_abs else corr_matrix.copy()
 
 
-    adj_matrix[adj_matrix < threshold] = 0
-    np.fill_diagonal(adj_matrix.values, 0)
+def build_or_load_adjacency_matrices_granger(returns, pickle_path, window, maxlag, alpha=0.05,boolean=False):
+    if os.path.exists(pickle_path):
+        print("Loading existing Granger adjacency matrices...")
+        granger_adj_matrices = pd.read_pickle(pickle_path)
+    else:
+        print("Computing Granger adjacency matrices...")
+        granger_adj_matrices = {}
 
-    G = nx.from_pandas_adjacency(adj_matrix)
 
-    return G, adj_matrix
+        for end in range(window, len(returns)):
+            date = returns.index[end]
+            returns_window= returns.iloc[end-window:end]
+            tickers=returns_window.columns
 
-def graph_summary_stats(G):
-    n_nodes = G.number_of_nodes()
-    n_edges = G.number_of_edges()
+            adj= pd.DataFrame(
+                0,
+                index=tickers,
+                columns=tickers,
+                dtype=float
+            )
+            for causing in tickers:
+                for caused in tickers:
+                    if causing==caused:
+                        continue
 
-    components = list(nx.connected_components(G))
-    largest_component_size = max(len(c) for c in components) if components else 0
-    for u, v, d in G.edges(data=True):
-        d["distance"] = 1 / d["weight"]
+                    pair_data=returns_window[[caused, causing]].dropna()
 
-    betweenness = nx.betweenness_centrality(
-        G,
-        weight="distance"
-    )
+                    try:
+                        result=grangercausalitytests(
+                            pair_data,
+                            maxlag=maxlag,
+                            verbose=boolean
+                        )
+                        p_value=result[maxlag][0]["ssr_ftest"][1]
 
-    stats = {
-        "nodes": n_nodes,
-        "edges": n_edges,
-        "density": nx.density(G),
-        "avg_clustering": nx.average_clustering(G, weight="weight"),
-        "largest_component": largest_component_size,
-        "largest_component_share": largest_component_size / n_nodes if n_nodes > 0 else 0,
-        "avg_strength": np.mean([v for _, v in G.degree(weight="weight")]),
-        "avg_betweenness": np.mean(list(betweenness.values())),
-        "max_betweenness": max(betweenness.values()) if betweenness else 0
-    }
+                        if p_value <alpha:
+                            adj.loc[causing, caused]=1.0
 
-    return stats
+                    except Exception as e:
+                        print(f"{causing} -> {caused}: {e}")
+                        adj.loc[causing, caused]=0.0
+            granger_adj_matrices[date]=adj
 
-def build_network_dataframe(rolling_corr,threshold=0.5,use_abs=True):
-    network_data=[]
-    unique_dates = rolling_corr.index.get_level_values(0).unique()
+        pd.to_pickle(granger_adj_matrices,pickle_path)
+        print("Saved Granger adjacency matrices.")
+    return granger_adj_matrices
     
-    for date in unique_dates:
+
+#Calculation of Key measures
+
+
+def build_network_dataframe_granger(adjacency_matrices):
+    
+    network_data =[]
+    for date, adjacency_matrix in adjacency_matrices.items():
+        G = nx.from_pandas_adjacency(adjacency_matrix, create_using=nx.DiGraph)
         
-        G, adj_matrix = build_graph_at_date(
-            rolling_corr,
-            date,
-            threshold=threshold,
-            use_abs=use_abs
-        )
+        # optional: remove zero-weight edges if needed
+        G.remove_edges_from([
+            (u, v) for u, v, d in G.edges(data=True)
+            if d.get("weight", 0) == 0
+        ])
+
+        #print("Nodes:", G.number_of_nodes())
+        #print("Edges:", G.number_of_edges())
+        
         # compute features
-        degree = nx.degree_centrality(G)
-        clustering = nx.clustering(G, weight="weight")
-        strength=dict(G.degree(weight="weight"))
-        for u, v, d in G.edges(data=True):
-            d["distance"] = 1 / d["weight"]
-        betweenness= nx.betweenness_centrality(G,weight='distance')
+        in_degree = dict(G.in_degree(weight="weight"))
+        out_degree = dict(G.out_degree(weight="weight"))
+        pagerank = nx.pagerank(G, weight="weight")
 
         # store results
-        for tic in adj_matrix.columns:
-            network_data.append({
-                "date": date,
-                "tic": tic,
-                "degree": degree.get(tic, 0),
-                "clustering":clustering.get(tic,0),
-                "strength": strength.get(tic, 0),
-                "betweenness": betweenness.get(tic,0)
-            })
-    return pd.DataFrame(network_data)
+        network_features = pd.DataFrame({
+            "date": date,
+            "tic": list(G.nodes()),
+            "granger_in_degree": [in_degree.get(tic, 0) for tic in G.nodes()],
+            "granger_out_degree": [out_degree.get(tic, 0) for tic in G.nodes()],
+            "granger_pagerank": [pagerank.get(tic, 0) for tic in G.nodes()],
+        })
+        network_data.append(network_features)
+    return pd.concat(network_data, ignore_index=True)
 
-def plot_graph_at_date(rolling_corr, date, threshold=0.5, use_abs=True, show_table=True, save_path=None, pos=None, Title=True):
-    G, _ = build_graph_at_date(rolling_corr, date, threshold=threshold, use_abs=use_abs)
 
-    fig = plt.figure(figsize=(13, 10))
+def compile_node_information_granger(network_data, processed_data):
+    network_data = network_data.copy()
+    processed_data = processed_data.copy()
+    network_data["date"] = pd.to_datetime(network_data["date"])
+    processed_data["date"] = pd.to_datetime(processed_data["date"])
 
-    ax_graph = plt.subplot2grid((4, 1), (0, 0), rowspan=3)
-    ax_table = plt.subplot2grid((4, 1), (3, 0))
+    NODE_NETWORK_FEATURES = ["granger_in_degree", "granger_out_degree", "granger_pagerank"]
 
-    if pos is None:
-        pos = nx.spring_layout(G, seed=42)
+    network_data[NODE_NETWORK_FEATURES] = (
+        network_data
+        .groupby("tic")[NODE_NETWORK_FEATURES]
+        .shift(1)
+    )
+    network_data=network_data.dropna()
 
-    strength = dict(G.degree(weight="weight"))
+    processed_data = processed_data.merge(network_data,on=["date", "tic"],how="left",validate="many_to_one")
+    processed_data[NODE_NETWORK_FEATURES] = processed_data[NODE_NETWORK_FEATURES].fillna(0)
+    return processed_data
 
-    node_sizes = [
-        100 + 10 * strength[node]
-        for node in G.nodes()
-    ]
+def compile_market_information_granger(network_data,processed_data):
+    network_data = network_data.copy()
+    processed_data = processed_data.copy()
+    network_data["date"] = pd.to_datetime(network_data["date"])
+    processed_data["date"] = pd.to_datetime(processed_data["date"])
+    average_granger_in_degree= network_data.groupby('date')['granger_in_degree'].mean()
+    average_granger_out_degree= network_data.groupby('date')['granger_out_degree'].mean()
+    average_granger_pagerank= network_data.groupby('date')['granger_pagerank'].mean()
 
-    edge_widths = [
-        0.5 + 2 * G[u][v]["weight"]
-        for u, v in G.edges()
-    ]
+    average_measures_date=pd.DataFrame({
+        'Average_granger_in_degree': average_granger_in_degree,
+        'Average_granger_out_degree': average_granger_out_degree, 
+        'Average_granger_pagerank': average_granger_pagerank
+    }).reset_index()
 
-    nx.draw_networkx_nodes(G, pos, node_size=node_sizes, alpha=0.8, ax=ax_graph)
-    nx.draw_networkx_edges(G, pos, width=edge_widths, alpha=0.4, ax=ax_graph)
-    nx.draw_networkx_labels(G, pos, font_size=8, ax=ax_graph)
+    MARKET_NETWORK_FEATURES_GRANGER = ["Average_granger_in_degree", "Average_granger_out_degree", "Average_granger_pagerank"]
+    average_measures_date[MARKET_NETWORK_FEATURES_GRANGER] = (average_measures_date[MARKET_NETWORK_FEATURES_GRANGER].shift(1))
 
-    if Title:
-        ax_graph.set_title(f"Network on {date} | threshold={threshold}")
-    ax_graph.axis("off")
+    
+    processed_data = processed_data.merge(
+        average_measures_date,
+        on="date",
+        how="left",
+        validate="many_to_one"
+    )
 
-    ax_table.axis("off")
 
-    if show_table:
-        stats = graph_summary_stats(G)
+    processed_data[MARKET_NETWORK_FEATURES_GRANGER] = processed_data[MARKET_NETWORK_FEATURES_GRANGER].fillna(0)
+    return processed_data
 
-        table_data = [
-            ["Nodes", stats["nodes"]],
-            ["Edges", stats["edges"]],
-            ["Density", f'{stats["density"]:.3f}'],
-            ["Avg clustering", f'{stats["avg_clustering"]:.3f}'],
-            ["Largest component", stats["largest_component"]],
-            ["Largest comp. share", f'{stats["largest_component_share"]:.2%}'],
-            ["Avg strength", f'{stats["avg_strength"]:.3f}'],
-            ["Avg Betweenness", f'{stats["avg_betweenness"]:.3f}'],
-            ["Max Betweenness", f'{stats["max_betweenness"]:.3f}']
-        ]
 
-        table = ax_table.table(
-            cellText=table_data,
-            colLabels=["Metric", "Value"],
-            loc="center",
-            cellLoc="left"
-        )
+def add_granger_network_features(processed_data, adjacency_matrices):
+    network_data = build_network_dataframe_granger(adjacency_matrices)
 
-        table.auto_set_font_size(False)
-        table.set_fontsize(8)
-        table.scale(1.1, 1.2)
+    processed_data = compile_node_information_granger(
+        network_data,
+        processed_data
+    )
 
-    plt.tight_layout()
-    if save_path is not None:
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
-    plt.show()
-    plt.close(fig)
+    processed_data = compile_market_information_granger(
+        network_data,
+        processed_data
+    )
 
-    return G
+    return processed_data

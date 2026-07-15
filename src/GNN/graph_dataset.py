@@ -53,6 +53,8 @@ def build_graph_snapshot(date,processed,adjacency_matrix,ticker_list,node_featur
     )
     graph.date=str(date)
     graph.tickers=ticker_list
+    graph.num_tickers = len(ticker_list)
+    graph.feature_names = node_feature_cols
 
     return graph
 

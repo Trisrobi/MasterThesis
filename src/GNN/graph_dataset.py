@@ -79,3 +79,22 @@ def build_pyg_graph_dataset(processed, adjacency_matrices, ticker_list, node_fea
         graphs.append(graph)
     
     return graphs
+
+
+def embeddings_to_dataframe(graphs, embeddings_list, prefix="gnn_emb"):
+    rows=[]
+
+    for graph, embeddings in zip(graphs, embeddings_list):
+        embeddings_np = embeddings.detach().cpu().numpy()
+
+        for i, tic in enumerate(graph.tickers):
+            row ={
+                "date": graph.date,
+                "tic": tic,
+            }
+
+            for j in range(embeddings_np.shape[1]):
+                row[f"{prefix}_{j}"] = embeddings_np[i,j]
+
+            rows.append(row)
+    return pd.DataFrame(rows)

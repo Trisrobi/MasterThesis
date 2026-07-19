@@ -1,5 +1,5 @@
 SEED= 42
-graph_type="Granger"
+graph_type="gnn"
 
 #Run Modes
 DEBUG=True
@@ -40,7 +40,8 @@ if graph_type=="Correlation":
 elif graph_type =="Granger":
     NETWORK_INDICATORS=["granger_in_degree", "granger_out_degree", "granger_pagerank"]
     MARKET_LEVEL_NETWORK_INDICATORS = ["Average_granger_in_degree", "Average_granger_out_degree", "Average_granger_pagerank"]
-
+elif graph_type=="gnn":
+    print("gnn")
 else:
     print("ok")
 

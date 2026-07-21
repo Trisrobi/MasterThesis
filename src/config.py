@@ -113,3 +113,5 @@ RUN_NAME = 'Test'
 MAXLAG=5
 GRANGER_PICKLE_PATH = "granger_adj_matrices.pkl"
 GRANGER_ALPHA=0.05
+
+GRANGER_EDGE_INDEX_PATH= "granger_edge_indices.pkl"

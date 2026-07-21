@@ -283,3 +283,169 @@ class GNNFeatureExtractorv2(BaseFeaturesExtractor):
             for batch_index in range(node_features.shape[0])
         ]
         return Batch.from_data_list(graphs)
+
+
+class DynamicGNNFeatureExtractor(BaseFeaturesExtractor):
+    """
+    SB3 feature extractor for FinRL observations containing:
+
+        {
+            "state": flat FinRL state,
+            "graph_id": ID of the rolling Granger graph,
+        }
+
+    Each observation may use a different graph.
+    """
+    def __init__(
+        self,
+        observation_space,
+        edge_index_bank: list[torch.Tensor],
+        num_nodes: int,
+        node_feature_dim: int,
+        embedding_dim: int = 8,
+        hidden_channels: int = 16,
+    ) -> None:
+        self.num_nodes= num_nodes
+        self.node_feature_dim = node_feature_dim
+        self.embedding_dim= embedding_dim
+
+        state_space= observation_space["state"]
+        actual_state_dim= int(state_space.shape[0])
+
+        expected_state_dim = (
+            1
+            + 2 * num_nodes
+            + num_nodes * node_feature_dim
+        )
+        
+        if actual_state_dim!=expected_state_dim:
+            raise ValueError(
+                "Unexpected FinRL state Dimension. "
+                f"Received {actual_state_dim}, but "
+                f"Expected {expected_state_dim}"
+            )
+        
+        self.portfolio_feature_dim= 1 + 2 * num_nodes
+
+        features_dim= (num_nodes*embedding_dim + self.portfolio_feature_dim)
+
+        super().__init__(
+            observation_space=observation_space,
+            features_dim=features_dim,
+        )
+
+        self.gnn = SimpleGCNEncoder(
+            in_channels=node_feature_dim,
+            hidden_channels=hidden_channels,
+            embedding_dim=embedding_dim,
+        )
+
+        self.edge_index_bank =[torch.as_tensor(edge_index, dtype=torch.long,) for edge_index in edge_index_bank]
+
+
+    def forward(self,observations: dict[str, torch.Tensor],)->torch.Tensor:
+        """
+        Parameters
+        ----------
+        observations
+            Tensor with shape:
+
+                [batch_size, FinRL_state_dim]
+
+        Returns
+        -------
+        torch.Tensor
+            Tensor with shape:
+
+                [
+                    batch_size,
+                    num_nodes * embedding_dim
+                    + 1
+                    + 2 * num_nodes
+                ]
+        """
+        states=observations["state"]
+
+        graph_ids= (observations["graph_id"].long().reshape(-1))
+
+        batch_size= states.shape[0]
+
+        portfolio_features=states[
+            :,
+            : self.portfolio_feature_dim,
+        ]
+
+        indicator_values=states[
+            :,
+            self.portfolio_feature_dim :,
+        ]
+
+        
+        # FinRL stores indicators in indicator-major order:
+        #
+        # [MACD_stock_1, ..., MACD_stock_N,
+        #  RSI_stock_1,  ..., RSI_stock_N,
+        #  ...]
+        #
+        # First reshape to:
+        # [batch, num_features, num_nodes]    
+        indicator_values = indicator_values.reshape(
+            batch_size,
+            self.node_feature_dim,
+            self.num_nodes,   
+        )
+
+        # Convert to:
+        # [batch, num_nodes, num_features]
+
+        node_features = indicator_values.transpose(1,2)
+
+        graphs=[]
+        for batch_index in range(batch_size):
+            graph_id =int(graph_ids[batch_index].item())
+
+            if not 0<=graph_id< len(self.edge_index_bank):
+                raise IndexError(
+                    f"graph_id {graph_id} is outside the valid range "
+                    f"[0, {len(self.edge_index_bank) - 1}]. "
+                )
+            
+            edge_index= self.edge_index_bank[graph_id].to(
+                node_features.device
+            )
+
+            graphs.append(
+                Data(x=node_features[batch_index], edge_index=edge_index,)
+            )
+
+        graph_batch= Batch.from_data_list(graphs)
+
+        node_embeddings = self.gnn(graph_batch)
+
+        graph_features= node_embeddings.reshape(
+            batch_size,
+            self.num_nodes * self.embedding_dim,
+        )
+
+        combined_features= torch.cat(
+            [graph_features,
+             portfolio_features,],
+             dim=1,
+        )
+
+        return combined_features
+    
+    def _build_graph_batch(self, node_features: torch.Tensor)-> Batch:
+        """
+        Build a PyTorch Geometric batch using the same fixed edge_index
+        for every observation in the SB3 batch.
+        """
+
+        graphs=[
+            Data(
+                x=node_features[batch_index],
+                edge_index= self.edge_index,
+            )
+            for batch_index in range(node_features.shape[0])
+        ]
+        return Batch.from_data_list(graphs)

@@ -1,8 +1,12 @@
+from __future__ import annotations
+
 import networkx as nx
 import pandas as pd
+import numpy as np
 from statsmodels.tsa.api import VAR
 from statsmodels.tsa.stattools import grangercausalitytests
 import os
+
 
 # Granger-network settings.
 
@@ -170,3 +174,68 @@ def add_granger_network_features(processed_data, adjacency_matrices):
     )
 
     return processed_data
+
+
+
+def build_adjacency_bank(adjacency_by_date: dict,ticker_order: list[str], )->tuple[np.ndarray, dict[pd.Timestamp, int], list[pd.Timestamp]]:
+    """
+    Convert date-indexed pandas adjacency matrices into a dense
+    adjacency bank and a stable date-to-ID mapping.
+
+    Returns
+    -------
+    adjacency_bank
+        Array with shape [num_graphs, num_nodes, num_nodes].
+
+    date_to_graph_id
+        Mapping from graph date to row index in adjacency_bank.
+
+    graph_dates
+        Ordered list of dates corresponding to adjacency_bank.
+    """
+    normalized_adjacency_by_date = {
+        pd.Timestamp(date): adjacency
+        for date, adjacency in adjacency_by_date.items()
+    }
+
+    graph_dates = sorted(
+        normalized_adjacency_by_date.keys()
+    )
+
+    adjacency_matrices=[]
+
+    for date in graph_dates:
+        adjacency = normalized_adjacency_by_date[date]
+
+        missing_rows= set(ticker_order)- set(adjacency.index)
+        missing_columns = set(ticker_order) - set(adjacency.columns)
+
+        if missing_rows or missing_columns:
+            raise ValueError(
+                f"Ticker mismatch for graph date {date}"
+                f"Missing rows: {sorted(missing_rows)}. "
+                f"Missing columns: {sorted(missing_columns)}. "
+            )
+        ordered_adjacency = (
+            adjacency
+            .loc[ticker_order, ticker_order]
+            .to_numpy(dtype=np.float32)
+        )
+
+        adjacency_matrices.append(ordered_adjacency)
+
+    adjacency_bank= np.stack(
+        adjacency_matrices,
+        axis=0,
+    )
+
+    date_to_graph_id = {
+        date: graph_id
+        for graph_id,date in enumerate(graph_dates)
+    }
+
+    return(
+        adjacency_bank,
+        date_to_graph_id,
+        graph_dates,
+    )

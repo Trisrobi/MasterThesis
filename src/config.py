@@ -2,7 +2,7 @@ SEED= 42
 graph_type="gnn"
 
 #Run Modes
-DEBUG=True
+DEBUG=False
 USE_NETWORK=True
 USE_MARKET_NETWORK=True
 EXPLORATION_MODE=False
@@ -111,7 +111,14 @@ from datetime import datetime
 RUN_NAME = 'Test'
 
 MAXLAG=5
-GRANGER_PICKLE_PATH = "granger_adj_matrices.pkl"
+
 GRANGER_ALPHA=0.05
 
-GRANGER_EDGE_INDEX_PATH= "granger_edge_indices.pkl"
+
+
+if DEBUG:
+    GRANGER_EDGE_INDEX_PATH= "granger_edge_indices.pkl"
+    GRANGER_PICKLE_PATH = "granger_adj_matrices.pkl"
+else:
+    GRANGER_EDGE_INDEX_PATH= "granger_edge_indices_full.pkl"
+    GRANGER_PICKLE_PATH = "granger_adj_matrices_full.pkl"
